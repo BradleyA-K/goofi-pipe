@@ -1,0 +1,197 @@
+nodes:
+  midiin0:
+    _type: MidiIn
+    category: inputs
+    params:
+      midi:
+        ports: '*'
+        participant_map: '*:61:P1, *:63:P2, *:66:P3'
+        note_on_only: true
+        min_velocity: 1
+        print_available_ports: true
+      common:
+        autotrigger: true
+        max_frequency: 30.0
+        frequency_mode: updates-per-second
+        process_group: ''
+    gui_kwargs:
+      pos:
+      - 134
+      - -251
+      viewers:
+        tap:
+          viewer_idx: 0
+          width: 175
+          height: 100
+          collapsed: false
+          log_scale_x: false
+          log_scale_y: false
+  syncanalyzer0:
+    _type: SyncAnalyzer
+    category: analysis
+    params:
+      sync:
+        threshold_ms: 100.0
+        window_sec: 2.5
+        min_n_events: 3
+        alpha: 0.05
+        beat_buffer_size: 32
+        dyadic_mode: tempo_coherence
+        tempo_threshold_ms: 50.0
+        timeout_sec: 5.0
+      common:
+        autotrigger: false
+        max_frequency: 30.0
+        frequency_mode: updates-per-second
+        process_group: ''
+    gui_kwargs:
+      pos:
+      - 350
+      - -163
+      viewers:
+        sync_result:
+          viewer_idx: 0
+          width: 175
+          height: 100
+          collapsed: false
+          log_scale_x: false
+          log_scale_y: false
+  audioout0:
+    _type: AudioOut
+    category: outputs
+    params:
+      audio:
+        sampling_rate: '44100'
+        device: MacBook Pro Speakers
+        transition_samples: 100
+      common:
+        autotrigger: false
+        max_frequency: 30.0
+        frequency_mode: updates-per-second
+        process_group: ''
+    gui_kwargs:
+      pos:
+      - 340
+      - 79
+      viewers:
+        finished:
+          viewer_idx: 0
+          width: 175
+          height: 100
+          collapsed: false
+          log_scale_x: false
+          log_scale_y: false
+  metronomegenerator0:
+    _type: MetronomeGenerator
+    category: inputs
+    params:
+      trial:
+        bpm: 140.0
+        sync_duration_sec: 45.0
+        continuation_duration_sec: 35.0
+        randomise_bpm: false
+        bpm_min: 100.0
+        bpm_max: 140.0
+        running: false
+      click:
+        frequency_hz: 1000.0
+        duration_ms: 12.0
+        volume: 0.8
+        sample_rate: 44100
+      common:
+        autotrigger: true
+        max_frequency: 30.0
+        frequency_mode: updates-per-second
+        process_group: ''
+    gui_kwargs:
+      pos:
+      - 65
+      - -5
+      viewers:
+        beat:
+          viewer_idx: 0
+          width: 175
+          height: 100
+          collapsed: false
+          log_scale_x: false
+          log_scale_y: false
+        audio_click:
+          viewer_idx: 0
+          width: 175
+          height: 100
+          collapsed: false
+          log_scale_x: false
+          log_scale_y: false
+  groupsyncscore0:
+    _type: GroupSyncScore
+    category: analysis
+    params:
+      scoring:
+        mode: tempo
+        smooth: 0.028999999165534973
+      common:
+        autotrigger: true
+        max_frequency: 30.0
+        frequency_mode: updates-per-second
+        process_group: ''
+    gui_kwargs:
+      pos:
+      - 561
+      - -86
+      viewers:
+        group_score:
+          viewer_idx: 0
+          width: 175
+          height: 100
+          collapsed: false
+          log_scale_x: false
+          log_scale_y: false
+        scores:
+          viewer_idx: 0
+          width: 175
+          height: 100
+          collapsed: false
+          log_scale_x: false
+          log_scale_y: false
+  oscout0:
+    _type: OSCOut
+    category: outputs
+    params:
+      osc:
+        address: 127.0.0.1
+        port: 9001
+        prefix: /goofi
+        bundle: false
+        broadcast: false
+        require_change: false
+      common:
+        autotrigger: false
+        max_frequency: 30.0
+        frequency_mode: updates-per-second
+        process_group: ''
+    gui_kwargs:
+      pos:
+      - 784
+      - 41
+      viewers: {}
+links:
+- node_out: midiin0
+  node_in: syncanalyzer0
+  slot_out: tap
+  slot_in: tap
+- node_out: syncanalyzer0
+  node_in: groupsyncscore0
+  slot_out: sync_result
+  slot_in: sync_result
+- node_out: metronomegenerator0
+  node_in: syncanalyzer0
+  slot_out: beat
+  slot_in: beat
+- node_out: metronomegenerator0
+  node_in: audioout0
+  slot_out: audio_click
+  slot_in: data
+- node_out: groupsyncscore0
+  node_in: oscout0
+  slot_out: scores
+  slot_in: data
