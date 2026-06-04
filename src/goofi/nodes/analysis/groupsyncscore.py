@@ -1,58 +1,77 @@
 """
 GroupSyncScore — Groovy pSync Node 4
 ======================================
-Reads the sync_result TABLE from SyncAnalyzer and computes:
+Turns the per-participant windowed averages from SyncAnalyzer into a
+single, scalable group-synchronisation metric:
 
-  1. Per-participant score  : how well each person is synchronised
-                              to the stimulus (sync phase) or to
-                              the group mean (continuation phase).
-                              Range 0.0 → 1.0.
+    "How many of the N participants are currently in sync?"
 
-  2. Group score            : mean synchrony across all active dyadic
-                              pairs.  Range 0.0 → 1.0.
-                              Partial credit — if 2 of 3 pairs are
-                              synchronised the score is ~0.67.
+It keeps the latest windowed values for every participant it has seen,
+decides per participant whether they are in sync (phase-dependent rule
+below), and reports the count.  Works for any number of participants.
 
-  3. Sync mode              : "phase" or "tempo" — selectable toggle.
-                              Reads the matching _phase_sig or
-                              _tempo_sig columns from SyncAnalyzer.
+In-sync rule (phase dependent)
+------------------------------
+  SYNC phase  (metronome audible)
+      A participant is in sync if their windowed metro_sync
+      (fraction of taps landing on the beat) >= metro_sync_min.
+      → they are matching the metronome.
+
+  CONTINUATION phase  (metronome silent)
+      Compute the group reference tempo = median of all participants'
+      windowed mean_iti_ms.  A participant is in sync if their mean ITI
+      is within tempo_tol_ms of that group median.
+      → they are matching each other's tempo.
+
+Stale participants (no tap for expiry_sec) are dropped from the roster.
 
 Outputs
 -------
-group_score : ARRAY   shape [1]  — 0.0 → 1.0 group synchrony
-scores      : TABLE   — one float[1] column per participant +
-                        one float[1] column per pair +
-                        phase string +
-                        elapsed float[1]
+group_score : ARRAY[1]   smoothed fraction in sync ∈ [0,1]
+scores      : TABLE      drives OSCOut -> standalone pygame dance display
+    phase                "synchronization"|"continuation"|"stopped" (string)
+    elapsed              seconds since trial start (float[1])
+    n_in_sync            number of participants in sync right now (float[1])
+    n_total              number of active participants (float[1])
+    frac_in_sync         smoothed n_in_sync / n_total ∈ [0,1] (float[1])
+    group_median_iti_ms  reference tempo in continuation (float[1])
+    P1_in_sync ...       per-participant smoothed flag ∈ [0,1] (float[1])
 
-Wire scores → OSCOut to drive the pygame orb display.
+Wire scores -> OSCOut.  Each table key becomes an OSC message at
+"<prefix>/<key>", e.g. /goofi/P1_in_sync, /goofi/n_total — that is what
+dance_display.py listens for.
 
 Parameters
 ----------
-scoring / mode
-    "phase"  — use <Pi>_<Pj>_phase_sig for pair sync flags
-    "tempo"  — use <Pi>_<Pj>_tempo_sig for pair sync flags
-scoring / smooth
-    Exponential smoothing factor 0–1 applied to group_score.
-    0 = no smoothing (raw), 0.9 = heavy smoothing.
-    Default 0.7 — gives a natural orb glow fade.
+scoring / metro_sync_min   Min windowed metro_sync to count as on-beat
+                           during the sync phase (default 0.5).
+scoring / tempo_tol_ms     Max |ITI - group median| in ms to count as
+                           tempo-matched during continuation (default 50).
+scoring / smooth           EMA factor 0-0.99 on flags + group score, for a
+                           smooth dance fade-in/out (default 0.7).
+scoring / expiry_sec       Drop a participant after this many seconds with
+                           no new tap (default 3.0).
 """
 
-import math
-import re
+import time
 from collections import defaultdict
 
 import numpy as np
 
 from goofi.data import Data, DataType
 from goofi.node import Node
-from goofi.params import FloatParam, StringParam
+from goofi.params import FloatParam
+
+
+def _plabel_key(label: str) -> int:
+    """Sort key for "P1", "P2", ... (falls back to 0 for odd labels)."""
+    return int(label[1:]) if label[1:].isdigit() else 0
 
 
 class GroupSyncScore(Node):
     """
-    Aggregates SyncAnalyzer output into a single group sync score
-    and per-participant scores for the pygame orb display.
+    Aggregates SyncAnalyzer's per-participant averages into a group
+    "n in sync / n total" metric plus per-participant flags.
     """
 
     NO_MULTIPROCESSING = True
@@ -72,124 +91,136 @@ class GroupSyncScore(Node):
     def config_params():
         return {
             "scoring": {
-                "mode": StringParam(
-                    "phase",
-                    options=["phase", "tempo"],
-                    doc=(
-                        "phase : use <Pi>_<Pj>_phase_sig columns from SyncAnalyzer.\n"
-                        "tempo : use <Pi>_<Pj>_tempo_sig columns."
-                    ),
+                "metro_sync_min": FloatParam(
+                    0.5, 0.0, 1.0,
+                    doc="Sync phase: min windowed metro_sync (fraction of taps "
+                        "on the beat) for a participant to count as in sync.",
+                ),
+                "tempo_tol_ms": FloatParam(
+                    50.0, 1.0, 500.0,
+                    doc="Continuation: max |mean_iti - group median| in ms for a "
+                        "participant to count as tempo-matched to the group.",
                 ),
                 "smooth": FloatParam(
                     0.7, 0.0, 0.99,
-                    doc="Exponential smoothing on group_score. "
-                        "0 = raw, 0.99 = very slow fade. Default 0.7.",
+                    doc="Exponential smoothing on flags and group score "
+                        "(0 = raw, 0.99 = very slow fade). Default 0.7.",
+                ),
+                "expiry_sec": FloatParam(
+                    3.0, 0.5, 30.0,
+                    doc="Drop a participant from the roster after this many "
+                        "seconds with no new tap.",
                 ),
             }
         }
 
     # ------------------------------------------------------------------
     def setup(self):
-        self._smoothed_group = 0.0
-        self._smoothed_participants: dict[str, float] = defaultdict(float)
+        # participant -> latest record {iti, metro_sync, t, elapsed}
+        self._latest: dict[str, dict] = {}
+        self._smoothed_flags: dict[str, float] = defaultdict(float)
+        self._smoothed_group: float = 0.0
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _scalar(table, key, default=float("nan")) -> float:
+        try:
+            return float(table[key].data[0])
+        except Exception:
+            return default
 
     # ------------------------------------------------------------------
     def process(self, sync_result):
         if sync_result is None:
             return None
 
-        data   = sync_result.data
-        mode   = self.params.scoring.mode.value
-        smooth = self.params.scoring.smooth.value
-        suffix = f"_{mode}_sig"   # e.g. "_phase_sig" or "_tempo_sig"
+        data = sync_result.data
 
-        # ── collect pair sync flags ───────────────────────────────────
-        pair_flags = {}
-        pair_pattern = re.compile(r"^(P\d+)_(P\d+)" + re.escape(suffix) + r"$")
-        for key, val in data.items():
-            m = pair_pattern.match(key)
-            if m:
-                try:
-                    flag = float(val.data[0])
-                    if not math.isnan(flag):
-                        pair_flags[key] = flag
-                except Exception:
-                    pass
+        metro_min  = self.params.scoring.metro_sync_min.value
+        tempo_tol  = self.params.scoring.tempo_tol_ms.value
+        smooth     = self.params.scoring.smooth.value
+        expiry     = self.params.scoring.expiry_sec.value
 
-        # Group score = mean of all pair sync flags
-        raw_group = float(np.mean(list(pair_flags.values()))) \
-            if pair_flags else 0.0
-
-        # ── per-participant score ─────────────────────────────────────
-        # During sync phase: use within_window (tap-to-stimulus)
-        # During continuation: use mean of all pair flags involving this participant
-        phase = "unknown"
+        # ── update roster with this tap's participant ────────────────
         try:
-            phase = str(data["phase"].data)
+            participant = str(data["participant"].data)
         except Exception:
-            pass
+            return None
+        phase = str(data["phase"].data) if "phase" in data else "unknown"
 
-        participants = set()
-        for key in pair_flags:
-            m = pair_pattern.match(key)
-            if m:
-                participants.add(m.group(1))
-                participants.add(m.group(2))
-
-        participant_scores = {}
-        for p in participants:
-            if phase == "synchronization":
-                # Individual score = within_window from tap-to-stimulus
-                try:
-                    participant = str(data["participant"].data)
-                    if participant == p:
-                        ww = float(data["within_window"].data[0])
-                        raw_p = ww if not math.isnan(ww) else 0.0
-                    else:
-                        raw_p = self._smoothed_participants.get(p, 0.0)
-                except Exception:
-                    raw_p = self._smoothed_participants.get(p, 0.0)
-            else:
-                # Continuation: mean of pair flags involving this participant
-                my_flags = [v for k, v in pair_flags.items()
-                            if k.startswith(f"{p}_") or
-                            f"_{p}{suffix}" in k]
-                raw_p = float(np.mean(my_flags)) if my_flags else 0.0
-
-            # Smooth
-            prev = self._smoothed_participants.get(p, raw_p)
-            smoothed_p = smooth * prev + (1.0 - smooth) * raw_p
-            self._smoothed_participants[p] = smoothed_p
-            participant_scores[p] = smoothed_p
-
-        # ── smooth group score ────────────────────────────────────────
-        self._smoothed_group = (smooth * self._smoothed_group
-                                + (1.0 - smooth) * raw_group)
-
-        # ── build outputs ─────────────────────────────────────────────
-        scores_table = {
-            "group_score": Data(DataType.ARRAY,
-                                np.array([self._smoothed_group]), {}),
-            "phase":       Data(DataType.STRING, phase, {}),
+        this_t = self._scalar(data, "tap_time", time.time())
+        self._latest[participant] = {
+            "iti":        self._scalar(data, "mean_iti_ms"),
+            "metro_sync": self._scalar(data, "metro_sync"),
+            "elapsed":    self._scalar(data, "elapsed"),
+            "t":          this_t,
         }
-        try:
-            scores_table["elapsed"] = Data(
-                DataType.ARRAY,
-                np.array([float(data["elapsed"].data[0])]), {}
-            )
-        except Exception:
-            scores_table["elapsed"] = Data(DataType.ARRAY, np.array([0.0]), {})
 
-        for p, score in participant_scores.items():
-            scores_table[f"{p}_score"] = Data(
-                DataType.ARRAY, np.array([score]), {}
-            )
+        # ── expire stale participants ────────────────────────────────
+        # Clock comes from the tap stream itself (tap_time), so this works
+        # for live MIDI and for replayed/offline data alike.
+        now = max(r["t"] for r in self._latest.values())
+        for p in [p for p, r in self._latest.items() if now - r["t"] > expiry]:
+            del self._latest[p]
+            self._smoothed_flags.pop(p, None)
+        if not self._latest:
+            return None
 
-        # Also pass pair flags through for the orb to use
-        for key, flag in pair_flags.items():
-            scores_table[key] = Data(DataType.ARRAY, np.array([flag]), {})
+        labels = sorted(self._latest.keys(), key=_plabel_key)
+
+        # ── group reference tempo (median of valid ITIs) ─────────────
+        itis = [self._latest[p]["iti"] for p in labels
+                if not np.isnan(self._latest[p]["iti"])]
+        group_median = float(np.median(itis)) if itis else float("nan")
+
+        # ── per-participant in-sync decision ─────────────────────────
+        raw_flags: dict[str, float] = {}
+        for p in labels:
+            rec = self._latest[p]
+            if phase == "synchronization":
+                ms = rec["metro_sync"]
+                raw = 1.0 if (not np.isnan(ms) and ms >= metro_min) else 0.0
+            elif phase == "continuation":
+                iti = rec["iti"]
+                if np.isnan(iti) or np.isnan(group_median):
+                    raw = 0.0
+                else:
+                    raw = 1.0 if abs(iti - group_median) <= tempo_tol else 0.0
+            else:
+                raw = 0.0
+            raw_flags[p] = raw
+
+            prev = self._smoothed_flags.get(p, raw)
+            self._smoothed_flags[p] = smooth * prev + (1.0 - smooth) * raw
+
+        n_total = len(labels)
+        n_in_sync = int(sum(raw_flags.values()))
+        raw_frac = n_in_sync / n_total if n_total else 0.0
+        self._smoothed_group = (smooth * self._smoothed_group
+                                + (1.0 - smooth) * raw_frac)
+
+        elapsed = self._latest[participant]["elapsed"]
+        if np.isnan(elapsed):
+            elapsed = 0.0
+
+        print(f"[GroupSyncScore] {phase[:4]} | in sync: {n_in_sync}/{n_total} "
+              f"| frac={self._smoothed_group:.2f}")
+
+        # ── build scores table ───────────────────────────────────────
+        scores = {
+            "phase":               Data(DataType.STRING, phase, {}),
+            "elapsed":             Data(DataType.ARRAY, np.array([elapsed]), {}),
+            "n_in_sync":           Data(DataType.ARRAY, np.array([float(n_in_sync)]), {}),
+            "n_total":             Data(DataType.ARRAY, np.array([float(n_total)]), {}),
+            "frac_in_sync":        Data(DataType.ARRAY, np.array([self._smoothed_group]), {}),
+            "group_median_iti_ms": Data(DataType.ARRAY, np.array([group_median]), {}),
+        }
+        for p in labels:
+            scores[f"{p}_in_sync"] = Data(
+                DataType.ARRAY, np.array([self._smoothed_flags[p]]), {}
+            )
 
         return {
             "group_score": (np.array([self._smoothed_group]), {}),
-            "scores":      (scores_table, {"phase": phase}),
+            "scores":      (scores, {"phase": phase, "n_in_sync": n_in_sync}),
         }

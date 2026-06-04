@@ -34,10 +34,6 @@ nodes:
         threshold_ms: 100.0
         window_sec: 2.5
         min_n_events: 3
-        alpha: 0.05
-        beat_buffer_size: 32
-        dyadic_mode: tempo_coherence
-        tempo_threshold_ms: 50.0
         timeout_sec: 5.0
       common:
         autotrigger: false
@@ -127,8 +123,10 @@ nodes:
     category: analysis
     params:
       scoring:
-        mode: tempo
+        metro_sync_min: 0.5
+        tempo_tol_ms: 50.0
         smooth: 0.028999999165534973
+        expiry_sec: 3.0
       common:
         autotrigger: true
         max_frequency: 30.0
