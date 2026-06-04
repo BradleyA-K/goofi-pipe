@@ -120,6 +120,9 @@ class GroupSyncScore(Node):
         self._latest: dict[str, dict] = {}
         self._smoothed_flags: dict[str, float] = defaultdict(float)
         self._smoothed_group: float = 0.0
+        # last (participant, tap_time) actually processed — guards against
+        # re-running on retained/duplicate data (e.g. if autotrigger is on).
+        self._last_key = None
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -149,6 +152,16 @@ class GroupSyncScore(Node):
         phase = str(data["phase"].data) if "phase" in data else "unknown"
 
         this_t = self._scalar(data, "tap_time", time.time())
+
+        # Only act on genuinely new taps. If the same frame is presented
+        # again (retained input under autotrigger, or after the trial has
+        # stopped and SyncAnalyzer went silent), do nothing — this is what
+        # makes the synchrony calculation stop when the trial ends.
+        key = (participant, this_t)
+        if key == self._last_key:
+            return None
+        self._last_key = key
+
         self._latest[participant] = {
             "iti":        self._scalar(data, "mean_iti_ms"),
             "metro_sync": self._scalar(data, "metro_sync"),

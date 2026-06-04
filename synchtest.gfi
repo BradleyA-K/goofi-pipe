@@ -128,7 +128,7 @@ nodes:
         smooth: 0.028999999165534973
         expiry_sec: 3.0
       common:
-        autotrigger: true
+        autotrigger: false
         max_frequency: 30.0
         frequency_mode: updates-per-second
         process_group: ''

@@ -96,7 +96,10 @@ class SyncAnalyzer(Node):
     def config_input_slots():
         return {
             "tap":  DataType.TABLE,
-            "beat": InputSlot(DataType.TABLE, trigger_process=False),
+            # beat triggers process() too, so the trial's "stopped" signal is
+            # noticed immediately even if no tap arrives. Retained-tap re-runs
+            # are filtered out in process() via tap_time de-duplication.
+            "beat": InputSlot(DataType.TABLE, trigger_process=True),
         }
 
     @staticmethod
@@ -140,6 +143,9 @@ class SyncAnalyzer(Node):
         self._trial_start: float | None = None
         self._current_phase: str = "stopped"
         self._last_beat_wall: float | None = None
+        # tap_time of the last tap actually emitted — used to ignore retained
+        # taps when process() is triggered by a beat (or by autotrigger).
+        self._last_tap_seen: float | None = None
         # Held metronome tempo — carried into the silent continuation phase.
         self._held_beat_interval_ms: float = float("nan")
         self._held_bpm: float = float("nan")
@@ -200,6 +206,7 @@ class SyncAnalyzer(Node):
         self._trial_start = None
         self._held_beat_interval_ms = float("nan")
         self._held_bpm = float("nan")
+        self._last_tap_seen = None
         print("[SyncAnalyzer] -- New trial detected: state reset --")
 
     def _nearest_beat(self, tap_time: float):
@@ -269,6 +276,15 @@ class SyncAnalyzer(Node):
             participant = str(tap.data["participant"].data)
         except Exception:
             return None
+
+        # Ignore retained taps: if this is the exact same tap we already
+        # handled (e.g. process() was triggered by a beat, not a new tap),
+        # do nothing. Keyed on (participant, tap_time) so two participants
+        # tapping at the same instant are both kept.
+        tap_key = (participant, tap_time)
+        if tap_key == self._last_tap_seen:
+            return None
+        self._last_tap_seen = tap_key
 
         label = self._get_label(participant)
         now = tap_time

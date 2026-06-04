@@ -191,7 +191,19 @@ class MetronomeGenerator(Node):
             self._start_trial()
         else:
             self._stop.set()
-            print("[MetronomeGenerator] Paused.")
+            # Emit one final "stopped" beat so downstream analysers halt
+            # immediately, just like a trial that runs to completion.
+            with self._lock:
+                self._queue.append({
+                    "beat_wall":     time.time(),
+                    "beat_index":    -1,
+                    "bpm":           float("nan"),
+                    "beat_interval": float("nan"),
+                    "phase":         "stopped",
+                    "elapsed":       float("nan"),
+                    "click_buf":     None,
+                })
+            print("[MetronomeGenerator] Paused -- sent stopped beat.")
 
     # ------------------------------------------------------------------
     # Trial start
