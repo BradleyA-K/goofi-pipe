@@ -63,7 +63,7 @@ nodes:
         randomise_bpm: true
         bpm_min: 100.0
         bpm_max: 140.0
-        running: false
+        running: true
       click:
         frequency_hz: 1000.0
         duration_ms: 12.0
@@ -135,7 +135,7 @@ nodes:
     gui_kwargs:
       pos:
       - 527
-      - 98
+      - 99
       viewers:
         group_score:
           viewer_idx: 0
@@ -151,15 +151,17 @@ nodes:
           collapsed: false
           log_scale_x: false
           log_scale_y: false
-  mothserver0:
-    _type: MothServer
+  oscout0:
+    _type: OSCOut
     category: outputs
     params:
-      server:
-        port: 8000
-        html_path: ''
-        value_key: frac_in_sync
-        open_browser: true
+      osc:
+        address: 127.0.0.1
+        port: 8001
+        prefix: /goofi
+        bundle: false
+        broadcast: false
+        require_change: false
       common:
         autotrigger: false
         max_frequency: 30.0
@@ -167,8 +169,8 @@ nodes:
         process_group: ''
     gui_kwargs:
       pos:
-      - 879
-      - 264
+      - 893
+      - 253
       viewers: {}
 links:
 - node_out: syncanalyzer0
@@ -188,6 +190,6 @@ links:
   slot_out: audio_click
   slot_in: data
 - node_out: groupsyncscore0
-  node_in: mothserver0
+  node_in: oscout0
   slot_out: scores
   slot_in: data
