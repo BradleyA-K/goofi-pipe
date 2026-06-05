@@ -48,20 +48,35 @@ from goofi.params import BoolParam, IntParam, StringParam
 # slider from the live value, so the moth HTML never has to be edited.
 _INJECT = """
 <script>
-/* injected by goofi MothServer -- drive the slider from live group synchrony */
+/* injected by goofi MothServer -- drive the moth from live group synchrony */
 (function () {
   var slider = document.getElementById("syncSlider");
-  if (!slider) return;
+
+  // live readout so you can SEE what goofi is sending
+  var box = document.createElement("div");
+  box.style.cssText = "position:fixed;top:10px;left:12px;color:#f4e7d0;"
+    + "font:13px monospace;background:rgba(0,0,0,.45);padding:6px 10px;"
+    + "border-radius:8px;z-index:9999;white-space:pre";
+  box.textContent = "connecting to goofi...";
+  document.body.appendChild(box);
+
   var target = null;                  // null until the first live value arrives
   try {
     var es = new EventSource("/events");
     es.onmessage = function (e) {
-      try { target = Math.max(0, Math.min(1, Number(JSON.parse(e.data).sync))); }
-      catch (_) {}
+      var d; try { d = JSON.parse(e.data); } catch (_) { return; }
+      target = Math.max(0, Math.min(1, Number(d.sync)));
+      var nt = Number(d.n_total) || 0;
+      box.textContent = "sync " + target.toFixed(2)
+        + "   in-sync " + (Number(d.n_in_sync) || 0) + "/" + nt
+        + "   " + (d.phase || "-")
+        + (nt === 0 ? "   (no data wired / no trial)" : "");
     };
+    es.onerror = function () { box.textContent = "goofi stream lost..."; };
   } catch (_) {}
+
   setInterval(function () {
-    if (target === null) return;      // no live data -> manual slider still works
+    if (target === null || !slider) return;   // no live data -> manual slider works
     var cur = Number(slider.value);
     slider.value = cur + (target - cur) * 0.15;   // smooth ease toward live value
   }, 33);

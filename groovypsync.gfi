@@ -20,8 +20,8 @@ nodes:
       viewers:
         sync_result:
           viewer_idx: 0
-          width: 185
-          height: 110
+          width: 225
+          height: 150
           collapsed: false
           log_scale_x: false
           log_scale_y: false
@@ -125,7 +125,7 @@ nodes:
       scoring:
         metro_sync_min: 0.20200000703334808
         tempo_tol_ms: 50.0
-        smooth: 0.2160000056028366
+        smooth: 0.6650000214576721
         expiry_sec: 3.0
       common:
         autotrigger: false
@@ -134,23 +134,42 @@ nodes:
         process_group: ''
     gui_kwargs:
       pos:
-      - 483
-      - 193
+      - 527
+      - 98
       viewers:
         group_score:
           viewer_idx: 0
-          width: 175
-          height: 100
+          width: 295
+          height: 220
           collapsed: false
           log_scale_x: false
           log_scale_y: false
         scores:
           viewer_idx: 0
-          width: 175
-          height: 100
+          width: 275
+          height: 200
           collapsed: false
           log_scale_x: false
           log_scale_y: false
+  mothserver0:
+    _type: MothServer
+    category: outputs
+    params:
+      server:
+        port: 8000
+        html_path: ''
+        value_key: frac_in_sync
+        open_browser: true
+      common:
+        autotrigger: false
+        max_frequency: 30.0
+        frequency_mode: updates-per-second
+        process_group: ''
+    gui_kwargs:
+      pos:
+      - 879
+      - 264
+      viewers: {}
 links:
 - node_out: syncanalyzer0
   node_in: groupsyncscore0
@@ -167,4 +186,8 @@ links:
 - node_out: metronomegenerator0
   node_in: audioout0
   slot_out: audio_click
+  slot_in: data
+- node_out: groupsyncscore0
+  node_in: mothserver0
+  slot_out: scores
   slot_in: data
