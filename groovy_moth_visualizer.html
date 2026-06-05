@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Mellow Moth Animation</title>
+  <style>
+    body {
+      margin: 0;
+      background: #1d1b22;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+    }
+
+    canvas {
+      background: radial-gradient(circle at center, #3b2d28, #15151c);
+      border-radius: 20px;
+    }
+
+    .controls {
+      width: 420px;
+      margin-top: 14px;
+      color: #f4e7d0;
+      text-align: center;
+      font-size: 15px;
+    }
+
+    .controls input {
+      width: 100%;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+<canvas id="mothCanvas" width="800" height="800"></canvas>
+
+<div class="controls">
+  <label for="syncSlider">
+    Groovy pSync synchrony input:
+    <span id="syncLabel">0.50</span>
+  </label>
+  <input id="syncSlider" type="range" min="0" max="1" step="0.01" value="0.5">
+</div>
+
+<script>
+const canvas = document.getElementById("mothCanvas");
+const ctx = canvas.getContext("2d");
+const syncSlider = document.getElementById("syncSlider");
+const syncLabel = document.getElementById("syncLabel");
+
+let t = 0;
+
+function ellipse(x, y, rx, ry, color) {
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function line(x1, y1, x2, y2, color, width = 2) {
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.stroke();
+}
+
+const fuzzPoints = Array.from({ length: 230 }, () => ({
+  x: 400 + (Math.random() - 0.5) * 150,
+  y: 355 + (Math.random() - 0.5) * 185,
+  angle: Math.random() * Math.PI * 2,
+  len: 3 + Math.random() * 5
+}));
+
+function drawPorchLamp() {
+  const lampX = 137;
+  const lampY = 160;
+
+  const gradient = ctx.createRadialGradient(lampX, lampY, 20, lampX, lampY, 390);
+  gradient.addColorStop(0, "rgba(255, 215, 130, 0.55)");
+  gradient.addColorStop(0.35, "rgba(255, 175, 70, 0.20)");
+  gradient.addColorStop(1, "rgba(255, 175, 70, 0)");
+
+  ctx.beginPath();
+  ctx.moveTo(lampX, lampY + 10);
+  ctx.lineTo(lampX + 280, 610);
+  ctx.lineTo(lampX - 280, 610);
+  ctx.closePath();
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  line(55, 70, 115, 70, "#111018", 12);
+  line(115, 70, 138, 110, "#111018", 12);
+
+  ctx.beginPath();
+  ctx.moveTo(55, 120);
+  ctx.quadraticCurveTo(135, 65, 220, 120);
+  ctx.lineTo(240, 165);
+  ctx.quadraticCurveTo(145, 190, 35, 165);
+  ctx.closePath();
+  ctx.fillStyle = "#141219";
+  ctx.fill();
+  ctx.strokeStyle = "#30251f";
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.ellipse(137, 165, 98, 18, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 185, 80, 0.55)";
+  ctx.fill();
+
+  ellipse(137, 160, 24, 31, "rgba(255, 230, 155, 0.95)");
+  ellipse(137, 160, 50, 55, "rgba(255, 185, 80, 0.16)");
+}
+
+function drawWing(cx, cy, side, flap) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(side * flap);
+
+  const wingPath = new Path2D();
+  wingPath.moveTo(0, 0);
+  wingPath.bezierCurveTo(side * 135, -85, side * 265, 30, side * 195, 235);
+  wingPath.bezierCurveTo(side * 145, 315, side * 35, 265, 0, 0);
+
+  ctx.fillStyle = "#92704a";
+  ctx.fill(wingPath);
+  ctx.strokeStyle = "#3a2a1f";
+  ctx.lineWidth = 4;
+  ctx.stroke(wingPath);
+
+  ctx.clip(wingPath);
+
+  for (let i = 0; i < 9; i++) {
+    line(0, 8, side * (70 + i * 16), 30 + i * 27, "rgba(58,39,27,0.7)", 2);
+  }
+
+  for (let i = 0; i < 5; i++) {
+    ctx.beginPath();
+    ctx.moveTo(side * 25, 60 + i * 38);
+    ctx.bezierCurveTo(
+      side * 90, 35 + i * 35,
+      side * 160, 70 + i * 35,
+      side * 185, 125 + i * 24
+    );
+    ctx.strokeStyle = "rgba(62,43,30,0.7)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  ellipse(side * 145, 210, 18, 18, "#2b211a");
+  ellipse(side * 145, 210, 8, 8, "#c99a5f");
+
+  ctx.restore();
+}
+
+function drawMug(x, y) {
+  ctx.beginPath();
+  ctx.roundRect(x - 55, y - 45, 110, 95, 18);
+  ctx.fillStyle = "#4a3329";
+  ctx.fill();
+  ctx.strokeStyle = "#c09a6b";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ellipse(x, y - 45, 52, 14, "#2e211c");
+  ellipse(x, y - 48, 43, 7, "#7a5639");
+
+  ctx.beginPath();
+  ctx.arc(x + 58, y, 28, -Math.PI / 2, Math.PI / 2);
+  ctx.strokeStyle = "#c09a6b";
+  ctx.lineWidth = 10;
+  ctx.stroke();
+
+  ctx.fillStyle = "#e8d1a2";
+  ctx.font = "18px serif";
+  ctx.textAlign = "center";
+  ctx.fillText("MELLOW", x, y - 5);
+  ctx.fillText("MOTH", x, y + 18);
+}
+
+function drawMoth() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const syncInput = Number(syncSlider.value);
+  syncLabel.textContent = syncInput.toFixed(2);
+
+  // Groovy pSync mapping:
+  // 0 = almost still, 1 = full Mellow Moth movement.
+  const animationSpeed = 0.005 + syncInput * 0.055;
+  const flapAmount = 0.060 * syncInput;
+  const bobAmount = 8 * syncInput;
+  const antennaAmount = 4 * syncInput;
+
+  t += animationSpeed;
+  const flap = Math.sin(t) * flapAmount;
+  const bob = Math.sin(t * 1.4) * bobAmount;
+
+  drawPorchLamp();
+
+  drawWing(380, 350 + bob, -1, flap);
+  drawWing(420, 350 + bob, 1, flap);
+
+  ellipse(400, 400 + bob, 90, 135, "#d5b98b");
+  ellipse(400, 335 + bob, 105, 90, "#e2cda2");
+
+  for (const f of fuzzPoints) {
+    const x1 = f.x;
+    const y1 = f.y + bob;
+    const x2 = x1 + Math.cos(f.angle) * f.len;
+    const y2 = y1 + Math.sin(f.angle) * f.len;
+    line(x1, y1, x2, y2, "rgba(80,55,35,0.22)", 1);
+  }
+
+  ellipse(365, 325 + bob, 22, 30, "#111018");
+  ellipse(435, 325 + bob, 22, 30, "#111018");
+  ellipse(373, 314 + bob, 6, 8, "#ffffff");
+  ellipse(443, 314 + bob, 6, 8, "#ffffff");
+
+  ctx.beginPath();
+  ctx.arc(400, 358 + bob, 14, 0.2, Math.PI - 0.2);
+  ctx.strokeStyle = "#3a291e";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // antennae - moves with whole moth
+  const leftAntennaTipX = 320;
+  const leftAntennaTipY = 155 + bob + Math.sin(t) * antennaAmount;
+
+  const rightAntennaTipX = 480;
+  const rightAntennaTipY = 155 + bob - Math.sin(t) * antennaAmount;
+
+  // main antenna stems
+  line(375, 270 + bob, leftAntennaTipX, leftAntennaTipY, "#c99a5f", 5);
+  line(425, 270 + bob, rightAntennaTipX, rightAntennaTipY, "#c99a5f", 5);
+
+  // feathery antenna hairs
+  for (let i = 0; i < 12; i++) {
+    const offset = i * 6;
+
+    // left antenna hairs
+    line(
+      leftAntennaTipX,
+      leftAntennaTipY + offset,
+      leftAntennaTipX - 35,
+      leftAntennaTipY - 10 + offset,
+      "#c99a5f",
+      2
+    );
+
+    // right antenna hairs
+    line(
+      rightAntennaTipX,
+      rightAntennaTipY + offset,
+      rightAntennaTipX + 35,
+      rightAntennaTipY - 10 + offset,
+      "#c99a5f",
+      2
+    );
+  }
+
+  ctx.beginPath();
+  ctx.arc(400, 315 + bob, 95, Math.PI, 0);
+  ctx.strokeStyle = "#171820";
+  ctx.lineWidth = 16;
+  ctx.stroke();
+
+  ellipse(310, 330 + bob, 32, 52, "#20222c");
+  ellipse(490, 330 + bob, 32, 52, "#20222c");
+  ellipse(310, 330 + bob, 18, 34, "#111217");
+  ellipse(490, 330 + bob, 18, 34, "#111217");
+
+  ellipse(350, 455 + bob, 32, 24, "#d9bd8e");
+  ellipse(450, 455 + bob, 32, 24, "#d9bd8e");
+
+  for (let i = 0; i < 4; i++) {
+    line(335 + i * 9, 450 + bob, 330 + i * 9, 470 + bob, "#8a6540", 2);
+    line(435 + i * 9, 450 + bob, 430 + i * 9, 470 + bob, "#8a6540", 2);
+  }
+
+  drawMug(400, 470 + bob);
+
+  ctx.fillStyle = "#2b211d";
+  ctx.fillRect(0, 610, 800, 190);
+
+  ellipse(620, 670, 95, 35, "#151318");
+  ellipse(620, 670, 45, 17, "#302a25");
+  ellipse(620, 670, 7, 7, "#8a6540");
+
+  requestAnimationFrame(drawMoth);
+}
+
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    this.beginPath();
+    this.moveTo(x + r, y);
+    this.lineTo(x + w - r, y);
+    this.quadraticCurveTo(x + w, y, x + w, y + r);
+    this.lineTo(x + w, y + h - r);
+    this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    this.lineTo(x + r, y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - r);
+    this.lineTo(x, y + r);
+    this.quadraticCurveTo(x, y, x + r, y);
+  };
+}
+
+drawMoth();
+</script>
+</body>
+</html>
